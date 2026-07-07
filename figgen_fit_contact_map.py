@@ -1,15 +1,12 @@
-import sys
 from os import path
+import sys
 import h5py
-
 import numpy as np
-from scipy.spatial.distance import squareform
+from scipy.stats import spearmanr
 import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm, LinearSegmentedColormap
 import matplotlib.cm
-
 from cooltools.lib.numutils import observed_over_expected
-
 
 # Normalisation of a Hi-C map
 def SCN(D0, max_iter=10):
@@ -55,8 +52,7 @@ def list_to_colormap(color_list, name=None):
 matplotlib.cm.register_cmap("fall", list_to_colormap(fall))
 matplotlib.cm.register_cmap("fall" + "_r", list_to_colormap(fall[::-1]))
 
-
-# Parsing arguments
+# Parsing arguments for unique simulation tag and contact threshold
 args = sys.argv
 tag = args[1]
 try:
@@ -64,33 +60,32 @@ try:
 except IndexError:
     threshold = 250
 
+# Load simulated Hi-C map
 with h5py.File(path.join("./analyses/", tag, "analysis.h5"), mode="r") as handler:
-# with h5py.File(path.join("./results/latest/sims/", tag, "analysis.h5"), mode="r") as handler:
     sim_matrix_avg = handler[f"Hi-C_matrix/{threshold}"][:]
 
+# Load experimental Hi-C map
 exp_matrix_avg = SCN(np.load("./resources/processed_data/Hi-C_matrix_16kbres.npy", allow_pickle=True))
 
-# print(np.sum(np.isnan(sim_matrix_avg)))
-# print(np.sum(np.isnan(exp_matrix_avg)))
-
-tag_saving = "state-open" # "off_states"
-
+# Parameters for plotting
 default_colours = plt.rcParams['axes.prop_cycle'].by_key()['color']
 gregor_colours = ["#7ab200", "#008f4c", "#009ba5", "#0085b6", "#004e9e", "#00177d", "#00053d"]
 plt.rcParams['font.family'] = ["serif", "sans-serif"]
 plt.rcParams['mathtext.fontset'] = "dejavuserif"
 fd = {"fontfamily": "serif", "fontsize": 36}
 
+# Masked array for plotting side-by-side
 premask = np.zeros_like(exp_matrix_avg)
 np.fill_diagonal(premask, np.nan)
 premask[np.tril_indices_from(premask)] = 1
 exp_tri = np.ma.masked_array(exp_matrix_avg, premask == 0)
 sim_tri = np.ma.masked_array(sim_matrix_avg, premask == 1)
 
+# Plot a manuscript-ready figure and save it
 fig, ax = plt.subplots(figsize=(10, 10))
 fig.set_layout_engine("tight")
 im_exp = ax.matshow(exp_tri, norm=LogNorm(vmin=1e-5, vmax=1e-1), cmap="fall");
-im_sim = ax.matshow(sim_tri, norm=LogNorm(vmin=1e-5, vmax=1e-1), cmap="fall");   # (vmin=1e-8, vmax=6e0) # vmin=1e-7, vmax=4e0
+im_sim = ax.matshow(sim_tri, norm=LogNorm(vmin=1e-5, vmax=1e-1), cmap="fall");
 cbar_exp = plt.colorbar(im_exp, ax=ax, orientation="horizontal", anchor=(0, 1.0), fraction=0.046, pad=0.04);
 cbar_sim = plt.colorbar(im_sim, ax=ax, orientation="vertical", fraction=0.046, pad=0.04);
 cbar_exp.set_label(label="normalized contact frequency", size=28, labelpad=16)
@@ -127,31 +122,15 @@ ax.set_xticklabels([])
 ax.set_yticklabels([])
 ax.xaxis.set_label_position('top')
 ax.tick_params(labelsize=20)
-# fig.savefig(f"./results/latest/state-open/.svg", format="svg")
 fig.savefig(path.join("./analyses/", tag, f"Hi-C_map_{threshold}-nm.svg"), format="svg")
 plt.close(fig)
 
-
 # Fitting the Hi-C
-interlocus_dists = np.arange(1, len(exp_matrix_avg), 1)
-corrs = []
-for dg in interlocus_dists:
-    contacts_sim_dg = np.diag(sim_matrix_avg, k=dg)
-    contacts_exp_dg = np.diag(exp_matrix_avg, k=dg)
-    corrs.append(np.corrcoef(contacts_exp_dg, contacts_sim_dg)[0,1])
-corr_final = np.nanmean(corrs)
-corr_final = np.corrcoef(sim_matrix_avg, exp_matrix_avg)[0, 1]
+corr_pearson = np.corrcoef(observed_over_expected(exp_matrix_avg)[0].flatten(),
+                           observed_over_expected(sim_matrix_avg)[0].flatten())[0,1]
+corr_spearman = spearmanr(observed_over_expected(exp_matrix_avg)[0].flatten(),
+                          observed_over_expected(sim_matrix_avg)[0].flatten())[0]
 
-from cooltools.lib.numutils import observed_over_expected
-from scipy.stats import spearmanr
-
-corr_final = np.corrcoef(observed_over_expected(exp_matrix_avg)[0].flatten(), observed_over_expected(sim_matrix_avg)[0].flatten())[0,1]
-# corr_final = spearmanr(observed_over_expected(exp_matrix_avg)[0].flatten(), observed_over_expected(sim_matrix_avg)[0].flatten())[0]
-
-print("Correlation: ", corr_final)
-
-# Printing error for redirecting out to file
-# sigma = 1 - np.abs(corr_final)
-# print(sigma)
-
-sys.exit(0)
+# Display important results from fitting procedure
+print(f"Pearson correlation: {corr_pearson:.3f}")
+print(f"Spearman correlation: {corr_spearman:.3f}")

@@ -1,26 +1,21 @@
+from os import path
+import h5py
 import matplotlib.pyplot as plt
 import numpy as np
-import h5py
-from os import path
-
-
-# 00_Rouse  -1.7549776801395776
-# 01_Rouse_excvol__loopex_unload=0.01_load=0.48    -1.5930252595751395 
-# 02_block_copolymer_eps=0.290  -1.7021766289825127
-# 03_block_copolymer_eps=0.290__loopex_unload=0.01_load=0.16    -1.709346216860327
-
+from polychrom.hdf5_format import load_hdf5_file
 
 genomic_dists = np.array([58, 82, 88, 149, 190, 595, 3327])
 
+# Taking only best-fit simulation cases
 sim_dirs = ["./trajectories/00_Rouse",
             "./trajectories/01_Rouse_excvol__loopex_unload=0.01_load=0.48",
             "./trajectories/02_block_copolymer_eps=0.290", 
-            "./trajectories/03_block_copolymer_eps=0.290__loopex_unload=0.01_load=0.16",]
+            "./trajectories/03_block_copolymer_eps=0.285__loopex_unload=0.01_load=0.32",]
 
-d_fits = [-1.7549776801395776,
-          -1.5930252595751395,
+d_fits = [-1.7484057550487109,
+          -1.594253793200877,
           -1.7021766289825127,
-          -1.709346216860327,]
+          -1.727653495652224,]
 
 tags = ["Rouse",
         "loopex",
@@ -29,36 +24,33 @@ tags = ["Rouse",
 
 for sim_dir, d_fit, tag in zip(sim_dirs, d_fits, tags):
 
+    # From Chen et al., verified with JB
     mean_loc_error = np.round(10 ** (np.log10(180) + d_fit), 2)    # 180 nm
 
     start = 4000
     step = 100
 
-    with h5py.File(path.join(sim_dir, "selected_monomer_coordinates.h5"), "r") as handler:
-        coordinates_raw = {x:y[:] for x, y in handler.items() if x!= "monomers"}
-    time = [int(t) for t in coordinates_raw.keys()]
-    time.sort()
-    time = time[start::step]
-    trajectory_length = len(time)
-    num_sets, num_loci, _ = coordinates_raw["0"].shape
-    coordinates = np.empty((trajectory_length, num_sets, num_loci, 3))
-    for i, t in enumerate(time):
-        coordinates[i] = coordinates_raw[str(t)]
+    # Load trajectory
+    coordinates = load_hdf5_file(path.join(sim_dir, "E-P_trajectory.h5"))["trajectory"]
 
+    # Compute R with and without localisation error
     R = np.linalg.norm(coordinates[..., 1, :] - coordinates[..., 0, :], axis=-1)
     R_ = np.mean(R, axis=0)
     R_with_error = np.random.normal(loc=R, scale=mean_loc_error, size=R.shape)
     R_with_error = np.mean(R_with_error, axis=0)
 
+    # Compute respective scaling exponents
     slope1, intercept1 = np.polyfit(np.log10(genomic_dists[:5]), np.log10(R_[:5]), deg=1)
     slope2, intercept2 = np.polyfit(np.log10(genomic_dists[:5]), np.log10(R_with_error[:5]), deg=1)
 
+    # Parameters for plotting
     default_colours = plt.rcParams['axes.prop_cycle'].by_key()['color']
     gregor_colours = ["#7ab200", "#008f4c", "#009ba5", "#0085b6", "#004e9e", "#00177d", "#00053d"]
     plt.rcParams['font.family'] = ["serif", "sans-serif"]
     plt.rcParams['mathtext.fontset'] = "dejavuserif"
     fd = {"fontfamily": "serif", "fontsize": 40}
 
+    # Plot a manuscript-ready figure and save it
     fig, ax = plt.subplots()
     fig.set_figwidth(12)
     fig.set_figheight(10)
